@@ -325,6 +325,16 @@ select:focus{border-color:var(--volt)}
           <button class="btn-ghost" style="font-size:13px;padding:11px 16px" onclick="gistLoad(true)">↓ Von Gist laden</button>
           <button class="btn-ghost" style="font-size:13px;padding:11px 16px" onclick="gistSync(true)">↑ Zu Gist pushen</button>
         </div>
+        <details class="warmup" style="margin-top:16px">
+          <summary>Gist-ID manuell setzen (Fallback)</summary>
+          <div class="wbody" style="border-radius:0 0 13px 13px">
+            Falls die automatische Suche den falschen oder keinen Gist findet: ID hier eintragen, um beide Geräte zu koppeln. Die ID steht oben im Status und in der Gist-URL (<code>gist.github.com/&lt;user&gt;/<b>ID</b></code>).
+            <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+              <input type="text" id="gidInput" placeholder="Gist-ID einfügen…" style="flex:1;min-width:200px;font-family:'JetBrains Mono';font-size:12px">
+              <button class="btn-ghost" style="font-size:13px;padding:11px 16px" onclick="setGistId()">Übernehmen &amp; laden</button>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
   </section>
@@ -633,14 +643,16 @@ function importData(e){
 const GH={get pat(){return localStorage.getItem('forge_pat')||''},get gid(){return localStorage.getItem('forge_gid')||''},set gid(v){localStorage.setItem('forge_gid',v)},api:'https://api.github.com/gists'};
 function syncDot(s){['syncDot','syncDot2'].forEach(id=>{const d=document.getElementById(id);if(!d)return;d.className='sync-dot '+s;d.title={syncing:'Synchronisiert…',ok:'In GitHub Gist gesichert ✓',err:'Sync-Fehler – Token prüfen',off:'Nur lokal gespeichert'}[s]||''});const l=document.getElementById('syncLbl');if(l)l.textContent={syncing:'Synct…',ok:'Gist ✓',err:'Fehler',off:'Lokal'}[s]||''}
 let syncTimer=null;
+function ghHeaders(json){const h={'Authorization':'Bearer '+GH.pat,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};if(json)h['Content-Type']='application/json';return h}
+function setStatus(txt,ok){const el=document.getElementById('ghUser');if(el){el.textContent=txt;el.className='con-status'+(ok?' ok':'')}}
 function gistSync(manual){if(!GH.pat){syncDot('off');return}if(!manual){clearTimeout(syncTimer);syncTimer=setTimeout(_doSync,1200);return}return _doSync()}
 async function _doSync(){
   syncDot('syncing');
   try{
     const body={files:{'forge-data.json':{content:JSON.stringify(state)}}};
     let resp;
-    if(GH.gid){resp=await fetch(GH.api+'/'+GH.gid,{method:'PATCH',headers:{'Authorization':'token '+GH.pat,'Content-Type':'application/json'},body:JSON.stringify(body)});}
-    else{resp=await fetch(GH.api,{method:'POST',headers:{'Authorization':'token '+GH.pat,'Content-Type':'application/json'},body:JSON.stringify(Object.assign({description:'FORGE Training Data',public:false},body))});if(resp.ok){const d=await resp.json();GH.gid=d.id;updateSettingsUI()}}
+    if(GH.gid){resp=await fetch(GH.api+'/'+GH.gid,{method:'PATCH',headers:ghHeaders(true),body:JSON.stringify(body)});}
+    else{resp=await fetch(GH.api,{method:'POST',headers:ghHeaders(true),body:JSON.stringify(Object.assign({description:'FORGE Training Data',public:false},body))});if(resp.ok){const d=await resp.json();GH.gid=d.id;updateSettingsUI()}}
     syncDot(resp.ok?'ok':'err');
   }catch(e){syncDot('err')}
 }
@@ -648,23 +660,68 @@ async function gistLoad(manual){
   if(!GH.pat||!GH.gid){if(manual)toast('Kein Token/Gist konfiguriert',true);return}
   syncDot('syncing');
   try{
-    const resp=await fetch(GH.api+'/'+GH.gid,{headers:{'Authorization':'token '+GH.pat}});
-    if(!resp.ok){syncDot('err');if(manual)toast('Laden fehlgeschlagen',true);return}
+    const resp=await fetch(GH.api+'/'+GH.gid,{headers:ghHeaders()});
+    if(!resp.ok){syncDot('err');if(manual)toast('Laden fehlgeschlagen ('+resp.status+')',true);return}
     const d=await resp.json();const c=d.files['forge-data.json']&&d.files['forge-data.json'].content;
     if(c){const p=JSON.parse(c);if(p.workouts)state=Object.assign({workouts:[],measurements:[],runs:[]},p);DB.save(state)}
     syncDot('ok');if(manual){toast('Von Gist geladen ✓');renderDash()}
-  }catch(e){syncDot('err');if(manual)toast('Fehler beim Laden',true)}
+  }catch(e){syncDot('err');if(manual)toast('Netzwerk/CORS blockiert – läuft die Seite über https?',true)}
+}
+async function findForgeGist(){
+  // alle Gists des Users durchsuchen (auch geheime, da authentifiziert)
+  let resp;
+  try{ resp=await fetch(GH.api+'?per_page=100',{headers:ghHeaders()}); }catch(e){ return null; }
+  if(!resp.ok) return null;
+  const list=await resp.json();
+  const cands=list.filter(g=>g.files && g.files['forge-data.json']);
+  if(!cands.length) return null;
+  if(cands.length===1) return cands[0].id;
+  // mehrere FORGE-Gists -> den mit den meisten Datensätzen wählen
+  let best=cands[0].id, bestScore=-1;
+  for(const g of cands){
+    let score=0;
+    try{
+      const r=await fetch(GH.api+'/'+g.id,{headers:ghHeaders()});
+      if(r.ok){const d=await r.json();const p=JSON.parse(d.files['forge-data.json'].content);
+        score=(p.workouts?p.workouts.length:0)+(p.runs?p.runs.length:0)+(p.measurements?p.measurements.length:0);}
+    }catch(e){}
+    if(score>bestScore){bestScore=score;best=g.id;}
+  }
+  return best;
 }
 async function connectGist(){
   const pat=getVal('patInput').trim();
   if(!pat||pat.startsWith('•')){toast('Token eingeben',true);return}
-  localStorage.setItem('forge_pat',pat);syncDot('syncing');
-  try{
-    const test=await fetch('https://api.github.com/user',{headers:{'Authorization':'token '+pat}});
-    if(!test.ok){toast('Token ungültig ('+test.status+')',true);syncDot('err');return}
-    const u=await test.json();const el=document.getElementById('ghUser');if(el){el.textContent='Verbunden als @'+u.login+' ✓';el.className='con-status ok'}
-    await _doSync();toast('Verbunden – Sync aktiv ✓');
-  }catch(e){toast('Verbindungsfehler',true);syncDot('err')}
+  if(pat.startsWith('github_pat_')){toast('Fine-grained Token funktioniert nicht für Gists – bitte CLASSIC Token (ghp_…) mit gist-Scope',true);setStatus('✗ Fine-grained Token – Classic nötig');return}
+  if(!pat.startsWith('ghp_')){toast('Sieht nicht wie ein Classic-Token (ghp_…) aus – trotzdem versuche ich es',true);}
+  localStorage.setItem('forge_pat',pat);syncDot('syncing');setStatus('Prüfe Token…');
+  let test;
+  try{ test=await fetch('https://api.github.com/user',{headers:ghHeaders()}); }
+  catch(e){ syncDot('err');setStatus('✗ Netzwerk/CORS blockiert');toast('fetch blockiert: Seite muss über https (GitHub Pages) laufen, nicht in der Vorschau/lokal',true);return; }
+  if(test.status===401){syncDot('err');setStatus('✗ Token abgelehnt (401)');toast('Token ungültig oder abgelaufen',true);return}
+  if(!test.ok){syncDot('err');setStatus('✗ GitHub-Fehler '+test.status);toast('GitHub antwortete mit '+test.status,true);return}
+  const u=await test.json();
+  setStatus('Verbunden als @'+u.login+' – suche Daten…',true);
+  // Vorhandenen FORGE-Gist finden und übernehmen (statt neuen anzulegen)
+  const foundId=await findForgeGist();
+  if(foundId){
+    GH.gid=foundId; updateSettingsUI();
+    await gistLoad(false);                 // Daten von GitHub ziehen – NICHT überschreiben
+    setStatus('Verbunden als @'+u.login+' ✓ — Daten geladen',true);
+    toast('Verbunden – '+(state.workouts.length+state.runs.length+state.measurements.length)+' Einträge von GitHub geladen ✓');
+    renderDash();
+  } else {
+    await _doSync();                        // kein Gist vorhanden -> neuen mit lokalen Daten
+    setStatus('Verbunden als @'+u.login+' ✓ — neuer Gist erstellt',true);
+    toast('Verbunden – neuer Gist erstellt ✓');
+  }
+}
+async function setGistId(){
+  const id=getVal('gidInput').trim();
+  if(!id){toast('Gist-ID eingeben',true);return}
+  if(!GH.pat){toast('Erst Token verbinden',true);return}
+  GH.gid=id; updateSettingsUI(); setVal('gidInput','');
+  await gistLoad(true);
 }
 function disconnectGist(){localStorage.removeItem('forge_pat');localStorage.removeItem('forge_gid');syncDot('off');const el=document.getElementById('ghUser');if(el){el.textContent='Nicht verbunden';el.className='con-status'}setVal('gistIdOut','');document.getElementById('gistIdOut').textContent='';setVal('patInput','');toast('Verbindung getrennt')}
 function updateSettingsUI(){const el=document.getElementById('ghUser');const gi=document.getElementById('gistIdOut');if(GH.pat&&el){if(!el.textContent.includes('@')){el.textContent='Token gespeichert ✓';el.className='con-status ok'}}if(GH.gid&&gi)gi.textContent='Gist-ID: '+GH.gid;const pi=document.getElementById('patInput');if(pi&&GH.pat)pi.value='•'.repeat(20)}
@@ -684,9 +741,16 @@ function rtBeep(){try{actx=actx||new(window.AudioContext||window.webkitAudioCont
 
 /* ============== INIT ============== */
 renderDash();rtRender();
-if(GH.pat&&GH.gid){syncDot('syncing');gistLoad().then(renderDash);}
-else if(GH.pat){syncDot('ok')}
-else{syncDot('off')}
+(async function initSync(){
+  if(!GH.pat){syncDot('off');return}
+  syncDot('syncing');
+  if(!GH.gid){                              // Token da, aber Gist-ID fehlt (neues Gerät) -> suchen
+    const found=await findForgeGist();
+    if(found){GH.gid=found;updateSettingsUI();}
+  }
+  if(GH.gid){ await gistLoad(false); renderDash(); }
+  else { syncDot('ok'); }
+})();
 </script>
 </body>
 </html>
