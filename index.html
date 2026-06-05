@@ -645,16 +645,28 @@ function syncDot(s){['syncDot','syncDot2'].forEach(id=>{const d=document.getElem
 let syncTimer=null;
 function ghHeaders(json){const h={'Authorization':'Bearer '+GH.pat,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};if(json)h['Content-Type']='application/json';return h}
 function setStatus(txt,ok){const el=document.getElementById('ghUser');if(el){el.textContent=txt;el.className='con-status'+(ok?' ok':'')}}
-function gistSync(manual){if(!GH.pat){syncDot('off');return}if(!manual){clearTimeout(syncTimer);syncTimer=setTimeout(_doSync,1200);return}return _doSync()}
-async function _doSync(){
+function gistSync(manual){if(!GH.pat){syncDot('off');return}if(!manual){clearTimeout(syncTimer);syncTimer=setTimeout(()=>_doSync(false),1200);return}return _doSync(true)}
+async function _doSync(manual){
+  if(!GH.pat){syncDot('off');return false}
   syncDot('syncing');
+  let resp;
   try{
     const body={files:{'forge-data.json':{content:JSON.stringify(state)}}};
-    let resp;
     if(GH.gid){resp=await fetch(GH.api+'/'+GH.gid,{method:'PATCH',headers:ghHeaders(true),body:JSON.stringify(body)});}
     else{resp=await fetch(GH.api,{method:'POST',headers:ghHeaders(true),body:JSON.stringify(Object.assign({description:'FORGE Training Data',public:false},body))});if(resp.ok){const d=await resp.json();GH.gid=d.id;updateSettingsUI()}}
-    syncDot(resp.ok?'ok':'err');
-  }catch(e){syncDot('err')}
+  }catch(e){syncDot('err');if(manual)toast('Netzwerk/CORS-Fehler beim Sync – läuft die Seite über https?',true);return false}
+  if(!resp.ok){
+    syncDot('err');
+    if(resp.status===403||resp.status===404){
+      setStatus('✗ Token fehlt der gist-Scope (HTTP '+resp.status+')');
+      if(manual)toast('Token darf keine Gists anlegen: dem Classic-Token fehlt der gist-Scope. Bitte neuen Token mit angehaktem gist erstellen.',true);
+    }else{
+      setStatus('✗ Sync-Fehler HTTP '+resp.status);
+      if(manual)toast('Sync-Fehler: GitHub HTTP '+resp.status,true);
+    }
+    return false;
+  }
+  syncDot('ok');return true;
 }
 async function gistLoad(manual){
   if(!GH.pat||!GH.gid){if(manual)toast('Kein Token/Gist konfiguriert',true);return}
@@ -701,6 +713,14 @@ async function connectGist(){
   if(test.status===401){syncDot('err');setStatus('✗ Token abgelehnt (401)');toast('Token ungültig oder abgelaufen',true);return}
   if(!test.ok){syncDot('err');setStatus('✗ GitHub-Fehler '+test.status);toast('GitHub antwortete mit '+test.status,true);return}
   const u=await test.json();
+  // Token-Scopes aus GitHub-Header lesen – gist MUSS dabei sein
+  const scopes=(test.headers.get('x-oauth-scopes')||'').split(/[,\s]+/).filter(Boolean);
+  if(!scopes.includes('gist')){
+    syncDot('err');
+    setStatus('✗ @'+u.login+' verbunden, aber Token hat KEINEN gist-Scope. Vorhanden: ['+(scopes.join(', ')||'keine')+']');
+    toast('Dem Token fehlt der gist-Scope! Neuen Classic-Token erstellen und „gist" anhaken.',true);
+    return;
+  }
   setStatus('Verbunden als @'+u.login+' – suche Daten…',true);
   // Vorhandenen FORGE-Gist finden und übernehmen (statt neuen anzulegen)
   const foundId=await findForgeGist();
@@ -711,9 +731,12 @@ async function connectGist(){
     toast('Verbunden – '+(state.workouts.length+state.runs.length+state.measurements.length)+' Einträge von GitHub geladen ✓');
     renderDash();
   } else {
-    await _doSync();                        // kein Gist vorhanden -> neuen mit lokalen Daten
-    setStatus('Verbunden als @'+u.login+' ✓ — neuer Gist erstellt',true);
-    toast('Verbunden – neuer Gist erstellt ✓');
+    const ok=await _doSync(true);          // kein Gist vorhanden -> neuen mit lokalen Daten
+    if(ok){
+      setStatus('Verbunden als @'+u.login+' ✓ — neuer Gist erstellt',true);
+      toast('Verbunden – neuer Gist erstellt ✓');
+    }
+    // bei Fehler hat _doSync(true) bereits die genaue Ursache gemeldet (z.B. fehlender gist-Scope)
   }
 }
 async function setGistId(){
