@@ -170,12 +170,12 @@ select:focus{border-color:var(--volt)}
 .section-label::after{content:"";flex:1;height:1px;background:var(--line)}
 
 /* REST TIMER */
-.rt-fab{position:fixed;bottom:24px;right:24px;z-index:120;width:60px;height:60px;border-radius:50%;background:var(--surface2);border:1px solid var(--line2);color:var(--volt);font-family:'JetBrains Mono';font-weight:700;font-size:13px;cursor:pointer;box-shadow:var(--shadow);transition:.2s;display:none;align-items:center;justify-content:center}
+.rt-fab{position:fixed;bottom:92px;right:20px;z-index:120;width:60px;height:60px;border-radius:50%;background:var(--surface2);border:1px solid var(--line2);color:var(--volt);font-family:'JetBrains Mono';font-weight:700;font-size:13px;cursor:pointer;box-shadow:var(--shadow);transition:.2s;display:none;align-items:center;justify-content:center}
 .rt-fab.show{display:flex}
 .rt-fab:hover{transform:scale(1.06);border-color:var(--volt)}
 .rt-fab.run{color:#0a0b0d;background:var(--volt);animation:rtpulse 1s infinite}
 @keyframes rtpulse{0%,100%{box-shadow:0 0 0 0 rgba(200,251,58,.4)}50%{box-shadow:0 0 0 12px rgba(200,251,58,0)}}
-.rt-panel{position:fixed;bottom:96px;right:24px;z-index:120;background:var(--surface);border:1px solid var(--line2);border-radius:16px;padding:16px;box-shadow:var(--shadow);display:none;width:230px}
+.rt-panel{position:fixed;bottom:162px;right:20px;z-index:121;background:var(--surface);border:1px solid var(--line2);border-radius:16px;padding:16px;box-shadow:var(--shadow);display:none;width:230px}
 .rt-panel.show{display:block;animation:fade .25s}
 .rt-time{font-family:'Anton';font-size:46px;text-align:center;color:var(--volt);line-height:1;margin-bottom:12px}
 .rt-presets{display:flex;gap:6px;margin-bottom:10px}
@@ -185,7 +185,7 @@ select:focus{border-color:var(--volt)}
 .rt-ctrl button{flex:1;background:var(--surface2);border:1px solid var(--line2);color:var(--txt);border-radius:8px;padding:10px 0;font-weight:800;font-size:12px;cursor:pointer;transition:.15s}
 .rt-ctrl button.go{background:var(--volt);color:#0a0b0d;border-color:var(--volt)}
 
-@media(max-width:560px){.set-row{grid-template-columns:30px 1fr 1fr}.head-inner{gap:12px}.logo h1{font-size:21px}.rt-fab{bottom:18px;right:18px}}
+@media(max-width:560px){.set-row{grid-template-columns:30px 1fr 1fr}.head-inner{gap:12px}.logo h1{font-size:21px}.rt-fab{bottom:88px;right:16px}.rt-panel{bottom:158px;right:16px}}
 </style>
 </head>
 <body>
@@ -360,8 +360,8 @@ const PLAN = {
     {id:"hipthrust", name:"Hip Thrust Maschine",   rep:"8–12", muscle:"Glute max"},
     {id:"abduction", name:"Abduktionsmaschine",    rep:"12–15",muscle:"Glute med · ITB"},
     {id:"adduction", name:"Adduktionsmaschine",    rep:"12–15",muscle:"Adduktoren"},
-    {id:"calfstand", name:"Wadenheben stehend",    rep:"10–12",muscle:"Gastrocnemius"},
-    {id:"calfsit",   name:"Wadenheben sitzend",    rep:"12–15",muscle:"Soleus"},
+    {id:"calfstand", name:"Wadenheben stehend einbeinig (KH)",rep:"10–12",muscle:"Gastrocnemius · auf Stufe"},
+    {id:"calfsit",   name:"Wadenheben sitzend (KH auf Knie)", rep:"12–15",muscle:"Soleus · auf Stufe"},
   ]},
   2:{name:"Oberkörper",exercises:[
     {id:"chestpress",name:"Brustpresse Maschine",     rep:"8–12", muscle:"Brust · horiz. Druck"},
@@ -750,20 +750,55 @@ function disconnectGist(){localStorage.removeItem('forge_pat');localStorage.remo
 function updateSettingsUI(){const el=document.getElementById('ghUser');const gi=document.getElementById('gistIdOut');if(GH.pat&&el){if(!el.textContent.includes('@')){el.textContent='Token gespeichert ✓';el.className='con-status ok'}}if(GH.gid&&gi)gi.textContent='Gist-ID: '+GH.gid;const pi=document.getElementById('patInput');if(pi&&GH.pat)pi.value='•'.repeat(20)}
 function renderSettings(){updateSettingsUI()}
 
-/* ============== REST TIMER ============== */
-let rtTotal=90,rtLeft=90,rtInt=null,rtRunning=false,actx=null;
-function fmtRT(s){return`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}
-function rtRender(){document.getElementById('rtTime').textContent=fmtRT(rtLeft);const fab=document.getElementById('rtFab');fab.textContent=rtRunning?fmtRT(rtLeft):'REST';fab.classList.toggle('run',rtRunning)}
-function toggleRT(){if(rtRunning){document.getElementById('rtPanel').classList.toggle('show')}else{document.getElementById('rtPanel').classList.toggle('show')}}
-function rtSet(s){rtTotal=s;rtLeft=s;rtStop();rtRender()}
-function rtToggle(){rtRunning?rtStop():rtStart()}
-function rtStart(){rtRunning=true;document.getElementById('rtGo').textContent='Pause';rtInt=setInterval(()=>{rtLeft--;if(rtLeft<=0){rtBeep();rtStop();rtLeft=rtTotal;toast('⏱ Pause vorbei – nächster Satz!','gold')}rtRender()},1000)}
-function rtStop(){rtRunning=false;clearInterval(rtInt);document.getElementById('rtGo').textContent='Start';rtRender()}
-function rtReset(){rtStop();rtLeft=rtTotal;rtRender()}
-function rtBeep(){try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();[0,150,300].forEach(t=>{const o=actx.createOscillator(),g=actx.createGain();o.connect(g);g.connect(actx.destination);o.frequency.value=880;g.gain.setValueAtTime(.001,actx.currentTime+t/1000);g.gain.exponentialRampToValueAtTime(.4,actx.currentTime+t/1000+.01);g.gain.exponentialRampToValueAtTime(.001,actx.currentTime+t/1000+.13);o.start(actx.currentTime+t/1000);o.stop(actx.currentTime+t/1000+.14)})}catch(e){}}
+/* ============== REST TIMER (persistent · Wall-Clock) ============== */
+let rtTotal=+localStorage.getItem('forge_rt_total')||90;
+let rtEnd=+localStorage.getItem('forge_rt_end')||0;     // Ziel-Zeitstempel (ms). 0 = inaktiv
+let rtLeft=rtEnd>Date.now()?Math.round((rtEnd-Date.now())/1000):rtTotal;
+let rtInt=null,actx=null;
+function rtRunning(){return rtEnd>Date.now()}
+function fmtRT(s){s=Math.max(0,Math.round(s));return`${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`}
+function rtRender(){
+  const run=rtRunning();
+  if(run)rtLeft=(rtEnd-Date.now())/1000;
+  document.getElementById('rtTime').textContent=fmtRT(rtLeft);
+  const fab=document.getElementById('rtFab');if(fab){fab.textContent=run?fmtRT(rtLeft):'REST';fab.classList.toggle('run',run)}
+  const go=document.getElementById('rtGo');if(go)go.textContent=run?'Pause':'Start';
+}
+function rtLoop(){clearInterval(rtInt);rtInt=setInterval(rtTick,250)}
+function rtTick(){
+  if(rtRunning()){rtRender()}
+  else if(rtEnd!==0){rtFinish()}      // gerade abgelaufen
+}
+function rtFinish(){
+  rtEnd=0;localStorage.removeItem('forge_rt_end');
+  clearInterval(rtInt);rtInt=null;rtLeft=rtTotal;
+  rtBeep();rtRender();toast('⏱ Pause vorbei – nächster Satz!','gold');
+}
+function toggleRT(){document.getElementById('rtPanel').classList.toggle('show')}
+function rtSet(s){rtTotal=s;localStorage.setItem('forge_rt_total',s);rtEnd=0;localStorage.removeItem('forge_rt_end');clearInterval(rtInt);rtInt=null;rtLeft=s;rtRender()}
+function rtToggle(){
+  if(rtRunning()){ // pausieren
+    rtLeft=Math.round((rtEnd-Date.now())/1000);
+    rtEnd=0;localStorage.removeItem('forge_rt_end');
+    clearInterval(rtInt);rtInt=null;rtRender();
+  }else{ // starten
+    if(rtLeft<=0)rtLeft=rtTotal;
+    rtEnd=Date.now()+rtLeft*1000;localStorage.setItem('forge_rt_end',rtEnd);
+    rtUnlock();rtLoop();rtRender();
+  }
+}
+function rtReset(){rtEnd=0;localStorage.removeItem('forge_rt_end');clearInterval(rtInt);rtInt=null;rtLeft=rtTotal;rtRender()}
+function rtUnlock(){try{actx=actx||new(window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume()}catch(e){}}
+function rtBeep(){try{rtUnlock();[0,150,300].forEach(t=>{const o=actx.createOscillator(),g=actx.createGain();o.connect(g);g.connect(actx.destination);o.frequency.value=880;g.gain.setValueAtTime(.001,actx.currentTime+t/1000);g.gain.exponentialRampToValueAtTime(.4,actx.currentTime+t/1000+.01);g.gain.exponentialRampToValueAtTime(.001,actx.currentTime+t/1000+.13);o.start(actx.currentTime+t/1000);o.stop(actx.currentTime+t/1000+.14)})}catch(e){}}
+function rtInit(){
+  if(rtEnd&&rtEnd<=Date.now()){rtEnd=0;localStorage.removeItem('forge_rt_end');rtLeft=rtTotal}  // lief ab, während Seite zu war
+  rtRender();
+  if(rtRunning())rtLoop();
+}
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)rtRender()});
 
 /* ============== INIT ============== */
-renderDash();rtRender();
+renderDash();rtInit();
 (async function initSync(){
   if(!GH.pat){syncDot('off');return}
   syncDot('syncing');
